@@ -16,10 +16,12 @@ public partial class MainWindow : Window
 {
     private readonly string settingsPath;
     private readonly DispatcherTimer updateTimer;
+    private readonly DispatcherTimer routeTimer;
     private readonly List<(Slider Slider, TextBlock Readout)> sliders = [];
     private readonly UserSettings settings;
     private EqProfile profile = EqProfile.Flat;
     private ApoConfig? apo;
+    private RoutedAudio? route;
     private bool bypass;
     private bool loading = true;
     private bool needsElevation;
@@ -31,8 +33,22 @@ public partial class MainWindow : Window
             "ZeroEqualizer", "settings.json");
         settings = LoadSettings(settingsPath);
         updateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
-        updateTimer.Tick += (_, _) => CommitPending();
+        updateTimer.Tick += (_, _) =>
+        {
+            if (!PreampSlider.IsMouseCaptureWithin && sliders.All(band => !band.Slider.IsMouseCaptureWithin))
+                CommitPending();
+        };
+        routeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(750) };
+        routeTimer.Tick += (_, _) =>
+        {
+            if (route is not { IsRunning: false } stopped) return;
+            var error = stopped.Error ?? "The app audio route stopped. Check the Windows volume mixer and playback devices.";
+            StopRoute();
+            SaveState();
+            UpdateConnection(error);
+        };
         InitializeComponent();
+        ScopePicker.SelectedIndex = settings.AppScope ? 1 : 0;
 
         AddSlider(ToneControls, "Bass", "Bass shelf");
         AddSlider(ToneControls, "Treble", "Treble shelf");
@@ -41,10 +57,19 @@ public partial class MainWindow : Window
             var label = frequency < 1000 ? frequency.ToString(CultureInfo.InvariantCulture) : $"{frequency / 1000}k";
             AddSlider(BandControls, label, $"{frequency} hertz");
         }
-        Loaded += (_, _) => RefreshDevices(settings.DeviceId);
+        Loaded += (_, _) =>
+        {
+            var savedOutput = settings.DeviceId;
+            var savedCable = settings.CableId;
+            RefreshDevices(settings.DeviceId);
+            if (AppScope && settings.ResumeRoute && apo?.IsConnected != true &&
+                SelectedDevice?.Id == savedOutput && SelectedCable?.Id == savedCable) StartRoute();
+        };
     }
 
     private AudioDevice? SelectedDevice => DevicePicker.SelectedItem as AudioDevice;
+    private AudioDevice? SelectedCable => CablePicker.SelectedItem as AudioDevice;
+    private bool AppScope => ScopePicker.SelectedIndex == 1;
     private bool IsEditable => !loading && IsLoaded;
 
     private void AddSlider(Panel panel, string label, string accessibleName)
@@ -79,13 +104,24 @@ public partial class MainWindow : Window
         try
         {
             var devices = AudioDevices.List();
+            var previousOutput = SelectedDevice?.Id;
+            var previousCable = SelectedCable?.Id;
             loading = true;
             DevicePicker.ItemsSource = devices;
             DevicePicker.SelectedItem = devices.FirstOrDefault(device => device.Id == selectedId)
                 ?? devices.FirstOrDefault(device => device.Id == apo?.ConnectedDevice)
                 ?? devices.FirstOrDefault(device => device.IsDefault)
                 ?? devices.FirstOrDefault();
+            var cables = devices.Where(RoutedAudio.IsCable).ToArray();
+            CablePicker.ItemsSource = cables;
+            CablePicker.SelectedItem = cables.FirstOrDefault(device => device.Id == (previousCable ?? settings.CableId))
+                ?? cables.FirstOrDefault(device => !device.IsDefault);
             loading = false;
+            if (route != null && (SelectedDevice?.Id != previousOutput || SelectedCable?.Id != previousCable))
+            {
+                StopRoute();
+                SaveState(previousOutput);
+            }
             LoadDevice();
             UpgradeLegacyGain();
         }
@@ -142,6 +178,13 @@ public partial class MainWindow : Window
 
     private void ResetPreampClicked(object sender, RoutedEventArgs args) => PreampSlider.Value = 0;
 
+    private void ReduceClippingClicked(object sender, RoutedEventArgs args)
+    {
+        var suggested = profile.PreampForHeadroom();
+        PreampSlider.Value = Math.Min(PreampSlider.Value, suggested);
+        CommitPending();
+    }
+
     private void UpdateReadouts()
     {
         foreach (var (slider, readout) in sliders) readout.Text = FormatDb(slider.Value);
@@ -168,6 +211,7 @@ public partial class MainWindow : Window
             ? "Boosts can clip full-scale audio. Use the manual preamp if you hear distortion."
             : null;
         ResponseStatus.Foreground = (Brush)FindResource(!bypass && peak > 0.1 ? "Caution" : "Subtle");
+        ClippingButton.IsEnabled = !bypass && peak > 0.1 && PreampSlider.Value > PreampSlider.Minimum;
         var range = Math.Max(12, Math.Ceiling(values.Max(value => Math.Abs(value)) / 6) * 6);
         double Y(double value) => height * (0.5 - value / (2 * range));
         GraphTop.Text = $"+{range:0}";
@@ -231,6 +275,11 @@ public partial class MainWindow : Window
         if (!applyPending) return;
         applyPending = false;
         SaveState();
+        if (AppScope)
+        {
+            route?.Update(profile, bypass);
+            return;
+        }
         if (SelectedDevice is { ApoPostMix: true, EnhancementsDisabled: false } device && apo?.ConnectedDevice == device.Id) Apply(device);
     }
 
@@ -259,9 +308,26 @@ public partial class MainWindow : Window
         var connected = apo?.IsConnected == true;
         var sameDevice = device != null && apo?.ConnectedDevice == device.Id;
         var ready = apo != null && device is { ApoRegistered: true, ApoPostMix: true, EnhancementsDisabled: false };
+        CableRow.Visibility = MixerButton.Visibility = AppScope ? Visibility.Visible : Visibility.Collapsed;
+        SetupButton.Content = needsElevation ? "Restart as admin" : "Audio setup";
+        if (AppScope)
+        {
+            var routing = route?.IsRunning == true;
+            ConnectionButton.Content = routing ? "Stop app EQ" : connected ? "Disconnect system EQ" : "Start app EQ";
+            ConnectionButton.IsEnabled = routing || connected || CanRoute;
+            ModeBadge.Text = routing ? bypass ? "APP BYPASS" : "APP EQ ACTIVE" : "PREVIEW";
+            ModeBadge.Foreground = (Brush)FindResource(routing && !bypass ? "Accent" : "Subtle");
+            if (error != null) ShowStatus(error, true);
+            else if (routing) ShowStatus("App route active · Audio sent to the selected cable plays through this output.");
+            else if (connected) ShowStatus("Disconnect system EQ before starting an app route.");
+            else if (SelectedCable == null) ShowStatus("VB-CABLE is required for app routing. Install it and refresh the device list.");
+            else if (SelectedCable.ApoRegistered) ShowStatus("Choose a cable without Equalizer APO enabled so the signal is processed once.");
+            else if (!CanRoute) ShowStatus("Select separate speakers or headphones. Keep the cable off the Windows default output.");
+            else ShowStatus("Start app EQ, then route Spotify or another playing app to this cable in Windows volume mixer.");
+            return;
+        }
         ConnectionButton.Content = sameDevice ? "Disconnect EQ" : connected ? "Move EQ here" : "Connect EQ";
         ConnectionButton.IsEnabled = sameDevice || ready;
-        SetupButton.Content = needsElevation ? "Restart as admin" : "Audio setup";
         var active = sameDevice && ready && error == null;
         ModeBadge.Text = active ? bypass ? "BYPASS ON" : "EQ ACTIVE" : "PREVIEW";
         ModeBadge.Foreground = (Brush)FindResource(active && !bypass ? "Accent" : "Subtle");
@@ -285,6 +351,18 @@ public partial class MainWindow : Window
     private void ConnectClicked(object sender, RoutedEventArgs args)
     {
         CommitPending();
+        if (AppScope)
+        {
+            if (route != null)
+            {
+                StopRoute();
+                SaveState();
+                UpdateConnection();
+            }
+            else if (apo?.IsConnected == true) DisconnectSystem();
+            else StartRoute();
+            return;
+        }
         if (SelectedDevice is not { } device || apo == null) return;
         if (apo.ConnectedDevice != device.Id)
         {
@@ -293,9 +371,14 @@ public partial class MainWindow : Window
             Apply(device);
             return;
         }
+        DisconnectSystem();
+    }
+
+    private void DisconnectSystem()
+    {
         try
         {
-            apo.Disconnect();
+            apo!.Disconnect();
             needsElevation = false;
             UpdateConnection();
         }
@@ -308,6 +391,62 @@ public partial class MainWindow : Window
         {
             UpdateConnection($"Couldn’t disconnect EQ. {error.Message}");
         }
+    }
+
+    private bool CanRoute => SelectedCable is { IsDefault: false, ApoRegistered: false } cable &&
+        SelectedDevice is { } output && cable.Id != output.Id && RoutedAudio.IsPlaybackTarget(output);
+
+    private void StartRoute()
+    {
+        if (!CanRoute || apo?.IsConnected == true) return;
+        try
+        {
+            route = new RoutedAudio(SelectedCable!.Id, SelectedDevice!.Id, profile, bypass);
+            if (!route.IsRunning) throw new InvalidOperationException(route.Error ?? "The app audio route did not start.");
+            settings.ResumeRoute = true;
+            routeTimer.Start();
+            SaveState();
+            UpdateConnection();
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or NotSupportedException or
+            System.Runtime.InteropServices.COMException or ArgumentException)
+        {
+            StopRoute();
+            SaveState();
+            UpdateConnection($"Couldn’t start app EQ. {error.Message}");
+        }
+    }
+
+    private void StopRoute()
+    {
+        routeTimer.Stop();
+        route?.Dispose();
+        route = null;
+        settings.ResumeRoute = false;
+    }
+
+    private void OpenMixerClicked(object sender, RoutedEventArgs args)
+    {
+        try { Process.Start(new ProcessStartInfo("ms-settings:apps-volume") { UseShellExecute = true })?.Dispose(); }
+        catch (Win32Exception error) { ShowStatus($"Couldn’t open Windows volume mixer. {error.Message}", true); }
+    }
+
+    private void ScopeChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (!IsEditable) return;
+        CommitPending();
+        StopRoute();
+        SaveState();
+        UpdateConnection();
+    }
+
+    private void CableChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (!IsEditable) return;
+        CommitPending();
+        StopRoute();
+        SaveState();
+        UpdateConnection();
     }
 
     private void SetupClicked(object sender, RoutedEventArgs args)
@@ -347,8 +486,9 @@ public partial class MainWindow : Window
             updateTimer.Stop();
             applyPending = false;
             SaveState(previous.Id);
-            if (previous.ApoPostMix && !previous.EnhancementsDisabled && apo?.ConnectedDevice == previous.Id) Apply(previous);
+            if (!AppScope && previous.ApoPostMix && !previous.EnhancementsDisabled && apo?.ConnectedDevice == previous.Id) Apply(previous);
         }
+        if (route != null) StopRoute();
         LoadDevice();
         SaveState();
     }
@@ -386,6 +526,9 @@ public partial class MainWindow : Window
         UpdateConnection();
         applyPending = true;
         CommitPending();
+        routeTimer.Stop();
+        route?.Dispose();
+        route = null;
     }
 
     private void ResetClicked(object sender, RoutedEventArgs args)
@@ -406,6 +549,8 @@ public partial class MainWindow : Window
     {
         var id = deviceId ?? SelectedDevice?.Id;
         settings.DeviceId = id;
+        settings.AppScope = AppScope;
+        settings.CableId = SelectedCable?.Id;
         settings.Outputs[id ?? Guid.Empty] = new OutputSettings
         {
             Profile = profile,
@@ -450,6 +595,9 @@ public partial class MainWindow : Window
     private sealed class UserSettings
     {
         public Guid? DeviceId { get; set; }
+        public Guid? CableId { get; set; }
+        public bool AppScope { get; set; }
+        public bool ResumeRoute { get; set; }
         public Dictionary<Guid, OutputSettings> Outputs { get; set; } = new();
         public Dictionary<string, EqProfile> Presets { get; set; } = new();
     }

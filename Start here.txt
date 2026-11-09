@@ -1,4 +1,4 @@
-ZERO EQUALIZER 1.2
+ZERO EQUALIZER 1.3
 
 Extract the full ZIP and open ZeroEqualizer.exe. The app uses Windows 10 or 11
 and the .NET 8 Desktop Runtime. You can preview controls and save presets before
@@ -28,6 +28,8 @@ Using the app
 - The graph shows the expected curve at 48 kHz, including the manual preamp.
   Preamp defaults to 0 dB. Adjust it yourself to change the overall EQ level.
   Presets and Reset EQ keep the preamp value. The 0 dB button resets it.
+- Reduce clipping lowers the preamp on demand to leave room for the current
+  boosts. Release a dragged fader to apply the new curve.
 - Pick a built-in preset or save your own. Each output remembers its own curve
   and bypass setting. Move EQ here switches the connected output explicitly.
 - Bypass temporarily removes Zero Equalizer's filters and keeps your settings.
@@ -36,3 +38,19 @@ Using the app
   alongside config.txt as config.txt.zero-equalizer-backup.
 - EQ applies to apps using shared Windows audio on the connected output. ASIO
   and WASAPI exclusive playback can bypass Windows audio effects.
+
+Spotify or other selected apps
+
+- Choose Routed app audio under EQ Scope. Select an installed VB-CABLE input
+  and the headphones or speakers you listen through. Keep your regular Windows
+  output as the default. VB-CABLE is available at https://vb-audio.com/Cable/.
+- Start app EQ after disconnecting Zero Equalizer's system EQ if prompted.
+  Use Windows volume mixer to send just the playing apps you want to EQ to the
+  cable.
+- Set those apps back to Default in the Windows mixer when you stop using the
+  cable route.
+
+Updates
+
+Starting with this version, Zero Equalizer checks GitHub on startup and
+opens verified newer releases. Earlier versions need this manual update once.

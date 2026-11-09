@@ -221,7 +221,7 @@
                 </Border>
                 <StackPanel>
                     <TextBlock Text="Zero Equalizer" FontSize="25" FontWeight="SemiBold" />
-                    <TextBlock Text="System-wide sound shaping for Windows" Foreground="{StaticResource Subtle}" FontSize="12" />
+                    <TextBlock Text="System and app audio EQ for Windows" Foreground="{StaticResource Subtle}" FontSize="12" />
                 </StackPanel>
             </DockPanel>
             <Border Style="{StaticResource Panel}" Margin="0,0,0,12">
@@ -233,6 +233,22 @@
                         <ComboBox x:Name="DevicePicker" Tag="Select an output" SelectionChanged="DeviceChanged" AutomationProperties.Name="Playback output">
                             <ComboBox.ItemTemplate>
                                 <DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" /></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </DockPanel>
+                    <DockPanel Margin="0,8,0,0" LastChildFill="True">
+                        <Button x:Name="MixerButton" DockPanel.Dock="Right" Content="Windows volume mixer" Click="OpenMixerClicked" Margin="7,0,0,0" Visibility="Collapsed" />
+                        <TextBlock Text="EQ SCOPE" Style="{StaticResource Caption}" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,11,0" />
+                        <ComboBox x:Name="ScopePicker" SelectedIndex="0" SelectionChanged="ScopeChanged" AutomationProperties.Name="Audio scope">
+                            <ComboBoxItem Content="All audio on the selected output" />
+                            <ComboBoxItem Content="Routed app audio · VB-CABLE" />
+                        </ComboBox>
+                    </DockPanel>
+                    <DockPanel x:Name="CableRow" Margin="0,8,0,0" Visibility="Collapsed" LastChildFill="True">
+                        <TextBlock Text="APP INPUT" Style="{StaticResource Caption}" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,11,0" />
+                        <ComboBox x:Name="CablePicker" Tag="Select VB-CABLE input" SelectionChanged="CableChanged" AutomationProperties.Name="App routing input">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
                     </DockPanel>
@@ -268,6 +284,8 @@
                             </StackPanel>
                             <Button DockPanel.Dock="Right" Content="0 dB" Click="ResetPreampClicked" Margin="12,0,0,0" MinHeight="29"
                                     Padding="9,4" ToolTip="Reset preamp to 0 dB" AutomationProperties.Name="Reset preamp to 0 dB" />
+                            <Button x:Name="ClippingButton" DockPanel.Dock="Right" Content="Reduce clipping" Click="ReduceClippingClicked" Margin="9,0,0,0" MinHeight="29"
+                                    Padding="9,4" ToolTip="Manually lower the preamp to leave room for boosts." />
                             <Slider x:Name="PreampSlider" Style="{StaticResource PreampFader}" Minimum="-24" Maximum="12" SmallChange="0.5" LargeChange="3"
                                     TickFrequency="0.5" IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" VerticalAlignment="Center"
                                     ValueChanged="PreampChanged" AutomationProperties.Name="Manual preamp in decibels" />

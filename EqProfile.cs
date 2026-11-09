@@ -78,6 +78,21 @@ public sealed record EqProfile(double Bass, double Treble, double[] Bands)
         return db;
     }
 
+    public double PreampForHeadroom()
+    {
+        var unattenuated = this with { PreampDb = 0 };
+        const int steps = 360;
+        double peak = unattenuated.ResponseDb(0);
+        for (var step = 0; step <= steps; step++)
+        {
+            double frequency = 5 * Math.Pow(ReferenceRate / 10.0, step / (double)steps);
+            peak = Math.Max(peak, unattenuated.ResponseDb(frequency));
+        }
+
+        // Leave 1 dB of estimated headroom and round down to the slider step.
+        return Math.Clamp(Math.Floor((-peak - 1) * 2) / 2, -24, 0);
+    }
+
     private CachedResponse Response
     {
         get
