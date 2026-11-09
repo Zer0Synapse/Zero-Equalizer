@@ -1,0 +1,38 @@
+ZERO EQUALIZER 1.2
+
+Extract the full ZIP and open ZeroEqualizer.exe. The app uses Windows 10 or 11
+and the .NET 8 Desktop Runtime. You can preview controls and save presets before
+connecting audio.
+
+Connect Windows audio
+
+1. Click Audio setup in Zero Equalizer and choose Install Equalizer APO.
+   Zero Equalizer verifies the official installer before opening it. If the
+   download does not complete, open Project page, download Equalizer APO 1.4.2,
+   then select Use downloaded installer.
+2. In its Device Selector, enable Equalizer APO on the playback device you
+   actually listen through. Enable its post-mix effect and restart Windows if
+   prompted. Keep device audio enhancements enabled.
+3. Open Zero Equalizer, click Refresh, select that playback output, and click
+   Connect EQ. Play music or a video, try Bass Boost, and compare with Bypass.
+
+The Equalizer APO installer allows unsigned Audio Processing Objects in the
+Windows audio engine. Equalizer APO documents this setting and its effect on
+protected audio here:
+https://sourceforge.net/p/equalizerapo/wiki/Developer%20documentation/
+
+Using the app
+
+- Bass and Treble are broad shelf controls. The other ten sliders adjust the
+  frequency bands individually. Double-click a slider to reset it.
+- The graph shows the expected curve at 48 kHz, including the manual preamp.
+  Preamp defaults to 0 dB. Adjust it yourself to change the overall EQ level.
+  Presets and Reset EQ keep the preamp value. The 0 dB button resets it.
+- Pick a built-in preset or save your own. Each output remembers its own curve
+  and bypass setting. Move EQ here switches the connected output explicitly.
+- Bypass temporarily removes Zero Equalizer's filters and keeps your settings.
+  Disconnect EQ removes its configuration block. Closing the app keeps the last
+  applied settings active. On first connect, the app saves the original config
+  alongside config.txt as config.txt.zero-equalizer-backup.
+- EQ applies to apps using shared Windows audio on the connected output. ASIO
+  and WASAPI exclusive playback can bypass Windows audio effects.
